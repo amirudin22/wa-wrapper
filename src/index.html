@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval'; media-src * blob:; connect-src * ws: wss:;" />
+  <title>WA Web Wrapper</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>💬</text></svg>" />
+</head>
+<body>
+  <div id="app">
+    <div id="splash">
+      <div class="splash-content">
+        <div class="splash-icon">
+          <svg width="80" height="80" viewBox="0 0 24 24" fill="white">
+            <path d="M12 2C6.48 2 2 6.48 2 12c0 1.88.54 3.63 1.48 5.12L2 22l4.88-1.48C8.37 21.46 10.12 22 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2zm0 18c-1.54 0-3.01-.44-4.24-1.2l-.36-.22-3.01.91.91-3.01-.22-.36C4.44 15.01 4 13.54 4 12c0-4.41 3.59-8 8-8s8 3.59 8 8-3.59 8-8 8z"/>
+            <path d="M11 6h2v6h-2zm0 7h2v2h-2z"/>
+          </svg>
+        </div>
+        <div class="splash-text">Memuat WhatsApp...</div>
+        <div class="splash-loader">
+          <div class="splash-loader-bar"></div>
+        </div>
+      </div>
+    </div>
+    <div id="error-page" style="display:none">
+      <div class="error-content">
+        <h1>Koneksi Bermasalah</h1>
+        <p id="error-message">Tidak dapat terhubung ke WhatsApp Web.</p>
+        <button onclick="location.reload()" class="error-retry">Coba Lagi</button>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/main.ts"></script>
+</body>
+</html>
