@@ -1,6 +1,12 @@
 import './style.css'
 import { setCache, getCache, clearExpired } from './dexie'
-import { injectCSS, setupMutationObserver, startDOMWatchdog, getInjectionVersion } from './injection'
+import {
+  injectCSS,
+  applyLayoutFix,
+  setupMutationObserver,
+  startDOMWatchdog,
+  getInjectionVersion,
+} from './injection'
 
 const WA_URL = 'https://web.whatsapp.com'
 
@@ -31,8 +37,9 @@ async function init(): Promise<void> {
     // Hide splash
     if (splash) splash.classList.add('hidden')
 
-    // Setup injection on load
+    // Apply layout fixes
     injectCSS()
+    applyLayoutFix()
     setupMutationObserver()
     startDOMWatchdog()
 

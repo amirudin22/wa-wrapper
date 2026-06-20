@@ -505,74 +505,84 @@ export async function clearExpired(): Promise<void> {
 
 ---
 
-## 8. CSS/JS Injection Strategy
+## 8. CSS/JS Injection Strategy — Native Mobile Layout
 
-Pendekatan berlapis untuk mengatasi perubahan struktur DOM WhatsApp:
+### Target
 
-### Layer 1: CSS Injection (onPageFinished)
+Mengubah layout WA Web (sidebar + chat panel berdampingan) menjadi **single-column mobile** seperti WA native, dengan gaya hijau khas WA.
 
-Target kelas DOM utama (per Mei 2026):
+### Layer 1: CSS Injection (On Load)
 
 ```css
-/* Force single-column mobile layout */
-div[data-testid="conversation-panel"] {
-  max-width: 100% !important;
-  flex: 1 !important;
-}
-
+/* === SINGLE-COLUMN === */
 div[data-testid="sidebar"] {
-  width: 100% !important;
-  max-width: 100% !important;
+  width: 100vw !important;
+  max-width: 100vw !important;
 }
 
-/* Hide desktop-only elements */
-header[data-testid="sidebar-search"], 
-div[data-testid="chat-list"] {
-  width: 100% !important;
+div[data-testid="conversation-panel"] {
+  width: 100vw !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 100 !important;
+  transform: translateX(100%) !important;
+  transition: transform 0.25s ease !important;
 }
 
-/* Responsive typography */
-html {
-  font-size: 14px;
-}
-
-@media (max-width: 480px) {
-  html { font-size: 12px; }
+/* Geser masuk saat chat aktif */
+div[data-testid="conversation-panel"]:not([style*="display: none"]) {
+  transform: translateX(0) !important;
 }
 ```
 
-### Layer 2: MutationObserver (Fallback)
+### Layer 2: JS Layout Enforcement
 
 ```typescript
-// src/injection.ts
-const observer = new MutationObserver(() => {
-  const panel = document.querySelector('[data-testid="conversation-panel"]');
-  if (panel && panel.getBoundingClientRect().width > window.innerWidth) {
-    panel.setAttribute('style', 'max-width: 100vw !important');
-  }
-});
+export function applyLayoutFix(): void {
+  const sidebar = document.querySelector('[data-testid="sidebar"]')
+  const panel = document.querySelector('[data-testid="conversation-panel"]')
+  if (!sidebar || !panel) return
 
-observer.observe(document.body, {
-  childList: true,
-  subtree: true,
-  attributes: true,
-});
-```
-
-### Layer 3: Version-checked update
-
-```typescript
-const INJECTION_VERSION = 'v1.2.0';
-
-async function ensureInjectionUpToDate(): Promise<void> {
-  const cachedVersion = await getCache<string>('config:injectionVersion');
-  if (cachedVersion !== INJECTION_VERSION) {
-    // Force re-inject CSS/JS
-    applyInjection();
-    await setCache('config:injectionVersion', INJECTION_VERSION);
-  }
+  sidebar.style.width = '100vw'
+  panel.style.position = 'fixed'
+  panel.style.inset = '0'
+  panel.style.zIndex = '100'
+  panel.style.transform = 'translateX(0)'
 }
 ```
+
+### Layer 3: MutationObserver
+
+Observer berjalan terus untuk mengembalikan layout jika WA mengubah DOM:
+
+```typescript
+const observer = new MutationObserver(() => applyLayoutFix())
+observer.observe(document.body, { childList: true, subtree: true, attributes: true })
+```
+
+### Layer 4: Periodic Watchdog
+
+Cek setiap 10 detik apakah selector masih valid + layout masih benar:
+
+```typescript
+setInterval(() => {
+  applyLayoutFix()
+  // log jika ada selector yang hilang
+}, 10000)
+```
+
+### Fitur native-like yang dihasilkan:
+
+| Fitur | Cara |
+|-------|------|
+| Single-column layout | Sidebar & chat panel full layar (tidak side-by-side) |
+| Header hijau WA | `background: #075E54` pada header |
+| FAB hijau | Tombol new chat: `#00a884`, 56px, shadow |
+| Search rounded | Input search: `border-radius: 24px` |
+| Unread badge hijau | `background: #00a884` |
+| Emoji panel mobile | `border-radius: 16px 16px 0 0`, dari bawah |
+| Chat input rounded | `border-radius: 24px` dengan dark background |
+| Transisi panel | Slide dari kanan saat buka chat (CSS transition) |
 
 ---
 
