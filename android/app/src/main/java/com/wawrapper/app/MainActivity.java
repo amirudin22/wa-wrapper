@@ -21,6 +21,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -238,19 +240,44 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                injectWAWrapper(view);
             }
         });
 
+        // Performance & storage
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
         webView.getSettings().setDatabaseEnabled(true);
         webView.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
+        webView.getSettings().setOffscreenPreRaster(true);
+
+        // Media & WebRTC
         webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
-        webView.getSettings().setAllowFileAccess(false);
         webView.getSettings().setMixedContentMode(
             WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         );
-        webView.getSettings().setOffscreenPreRaster(true);
+
+        // === DISABLE ZOOM ===
+        webView.getSettings().setSupportZoom(false);
+        webView.getSettings().setBuiltInZoomControls(false);
+        webView.getSettings().setDisplayZoomControls(false);
+
+        // === MINIMIZE BROWSER UX ===
+        webView.getSettings().setLoadWithOverviewMode(true);
+        webView.getSettings().setUseWideViewPort(false);
+        webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
+        webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        webView.setHorizontalScrollBarEnabled(false);
+        webView.setVerticalScrollBarEnabled(false);
+        webView.getSettings().setLayoutAlgorithm(
+            WebSettings.LayoutAlgorithm.NARROW_COLUMNS
+        );
+
+        // Disable long press context menu (browser-like)
+        webView.setOnLongClickListener(v -> true);
+
+        // Security
+        webView.getSettings().setAllowFileAccess(false);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             webView.getSettings().setForceDark(
@@ -322,5 +349,47 @@ public class MainActivity extends BridgeActivity {
                 }
             }
         }
+    }
+
+    private void injectWAWrapper(WebView view) {
+        String css =
+            "div[data-testid=\"sidebar\"]{" +
+            "width:100vw!important;max-width:100vw!important;min-width:100vw!important;flex:none!important;}" +
+            "div[data-testid=\"conversation-panel\"]{" +
+            "width:100vw!important;max-width:100vw!important;min-width:100vw!important;flex:none!important;" +
+            "position:fixed!important;top:0!important;left:0!important;bottom:0!important;z-index:100!important;" +
+            "transform:translateX(100%)!important;transition:transform 0.25s ease!important;}" +
+            "div[data-testid=\"conversation-panel\"]:not([style*=\"display: none\"]){" +
+            "transform:translateX(0)!important;}" +
+            "header, header[data-testid=\"sidebar-search\"], " +
+            "div[data-testid=\"conversation-header\"]{" +
+            "background:#075E54!important;color:white!important;}" +
+            "button[data-testid=\"conversation-new\"]," +
+            "button[data-testid=\"new-chat-button\"]{" +
+            "position:fixed!important;bottom:24px!important;right:24px!important;" +
+            "width:56px!important;height:56px!important;border-radius:50%!important;" +
+            "background:#00a884!important;box-shadow:0 4px 12px rgba(0,0,0,0.3)!important;z-index:50!important;}" +
+            "footer[data-testid=\"conversation-footer\"]{" +
+            "background:#1f2c33!important;border-top:1px solid #2a3942!important;}";
+
+        String cssInjection = String.format(
+            "(function(){var s=document.createElement('style');s.textContent='%s';" +
+            "s.id='wa-wrapper-css';document.head.appendChild(s);})();",
+            css
+        );
+        view.evaluateJavascript(cssInjection, null);
+
+        String layoutFix =
+            "setInterval(function(){" +
+            "var s=document.querySelector('[data-testid=\"sidebar\"]');" +
+            "var p=document.querySelector('[data-testid=\"conversation-panel\"]');" +
+            "if(!s||!p)return;" +
+            "s.style.width='100vw';s.style.maxWidth='100vw';s.style.minWidth='100vw';s.style.flex='none';" +
+            "p.style.position='fixed';p.style.top='0';p.style.left='0';p.style.bottom='0';p.style.zIndex='100';" +
+            "p.style.width='100vw';p.style.maxWidth='100vw';p.style.minWidth='100vw';p.style.flex='none';" +
+            "if(p.parentElement)p.parentElement.style.display='block';" +
+            "},2000);";
+
+        view.evaluateJavascript(layoutFix, null);
     }
 }

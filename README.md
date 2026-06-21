@@ -507,82 +507,101 @@ export async function clearExpired(): Promise<void> {
 
 ## 8. CSS/JS Injection Strategy — Native Mobile Layout
 
-### Target
+### Pendekatan
 
-Mengubah layout WA Web (sidebar + chat panel berdampingan) menjadi **single-column mobile** seperti WA native, dengan gaya hijau khas WA.
+Injection dilakukan dari **Java** via `evaluateJavascript`, bukan dari JS bundle Vite. Karena `capacitor.config.json` mengarahkan WebView langsung ke `https://web.whatsapp.com`, maka script injection harus dimasukkan dari sisi Java setelah halaman selesai dimuat.
 
-### Layer 1: CSS Injection (On Load)
+### Implementasi di MainActivity.java
 
-```css
-/* === SINGLE-COLUMN === */
-div[data-testid="sidebar"] {
-  width: 100vw !important;
-  max-width: 100vw !important;
-}
+```java
+private void injectWAWrapper(WebView view) {
+    String css =
+        "div[data-testid=\"sidebar\"]{" +
+        "width:100vw!important;max-width:100vw!important;min-width:100vw!important;flex:none!important;" +
+        "}" +
+        "div[data-testid=\"conversation-panel\"]{" +
+        "width:100vw!important;max-width:100vw!important;min-width:100vw!important;flex:none!important;" +
+        "position:fixed!important;top:0!important;left:0!important;bottom:0!important;z-index:100!important;" +
+        "transform:translateX(100%)!important;transition:transform 0.25s ease!important;" +
+        "}" +
+        "div[data-testid=\"conversation-panel\"]:not([style*=\"display: none\"]){" +
+        "transform:translateX(0)!important;" +
+        "}" +
+        "header, header[data-testid=\"sidebar-search\"]," +
+        "div[data-testid=\"conversation-header\"]{" +
+        "background:#075E54!important;color:white!important;" +
+        "}" +
+        "button[data-testid=\"conversation-new\"]," +
+        "button[data-testid=\"new-chat-button\"]{" +
+        "position:fixed!important;bottom:24px!important;right:24px!important;" +
+        "width:56px!important;height:56px!important;border-radius:50%!important;" +
+        "background:#00a884!important;box-shadow:0 4px 12px rgba(0,0,0,0.3)!important;z-index:50!important;" +
+        "}" +
+        "footer[data-testid=\"conversation-footer\"]{" +
+        "background:#1f2c33!important;border-top:1px solid #2a3942!important;" +
+        "}";
 
-div[data-testid="conversation-panel"] {
-  width: 100vw !important;
-  position: fixed !important;
-  inset: 0 !important;
-  z-index: 100 !important;
-  transform: translateX(100%) !important;
-  transition: transform 0.25s ease !important;
-}
+    String cssInjection = String.format(
+        "(function(){var s=document.createElement('style');" +
+        "s.textContent='%s';s.id='wa-wrapper-css';" +
+        "document.head.appendChild(s);})();",
+        css
+    );
+    view.evaluateJavascript(cssInjection, null);
 
-/* Geser masuk saat chat aktif */
-div[data-testid="conversation-panel"]:not([style*="display: none"]) {
-  transform: translateX(0) !important;
+    String layoutFix =
+        "setInterval(function(){" +
+        "var s=document.querySelector('[data-testid=\"sidebar\"]');" +
+        "var p=document.querySelector('[data-testid=\"conversation-panel\"]');" +
+        "if(!s||!p)return;" +
+        "s.style.width='100vw';s.style.maxWidth='100vw';" +
+        "s.style.minWidth='100vw';s.style.flex='none';" +
+        "p.style.position='fixed';p.style.top='0';" +
+        "p.style.left='0';p.style.bottom='0';p.style.zIndex='100';" +
+        "p.style.width='100vw';p.style.maxWidth='100vw';" +
+        "p.style.minWidth='100vw';p.style.flex='none';" +
+        "if(p.parentElement)p.parentElement.style.display='block';" +
+        "},2000);";
+    view.evaluateJavascript(layoutFix, null);
 }
 ```
 
-### Layer 2: JS Layout Enforcement
+### Yang di-disable di WebView (browser UX removal)
 
-```typescript
-export function applyLayoutFix(): void {
-  const sidebar = document.querySelector('[data-testid="sidebar"]')
-  const panel = document.querySelector('[data-testid="conversation-panel"]')
-  if (!sidebar || !panel) return
+```java
+// Zoom
+webView.getSettings().setSupportZoom(false);
+webView.getSettings().setBuiltInZoomControls(false);
+webView.getSettings().setDisplayZoomControls(false);
 
-  sidebar.style.width = '100vw'
-  panel.style.position = 'fixed'
-  panel.style.inset = '0'
-  panel.style.zIndex = '100'
-  panel.style.transform = 'translateX(0)'
-}
+// Scroll bars
+webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
+webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+webView.setHorizontalScrollBarEnabled(false);
+webView.setVerticalScrollBarEnabled(false);
+
+// Layout
+webView.getSettings().setUseWideViewPort(false);
+webView.getSettings().setLayoutAlgorithm(
+    WebSettings.LayoutAlgorithm.NARROW_COLUMNS
+);
+
+// Long press context menu
+webView.setOnLongClickListener(v -> true);
 ```
 
-### Layer 3: MutationObserver
-
-Observer berjalan terus untuk mengembalikan layout jika WA mengubah DOM:
-
-```typescript
-const observer = new MutationObserver(() => applyLayoutFix())
-observer.observe(document.body, { childList: true, subtree: true, attributes: true })
-```
-
-### Layer 4: Periodic Watchdog
-
-Cek setiap 10 detik apakah selector masih valid + layout masih benar:
-
-```typescript
-setInterval(() => {
-  applyLayoutFix()
-  // log jika ada selector yang hilang
-}, 10000)
-```
-
-### Fitur native-like yang dihasilkan:
+### Fitur native-like:
 
 | Fitur | Cara |
 |-------|------|
-| Single-column layout | Sidebar & chat panel full layar (tidak side-by-side) |
-| Header hijau WA | `background: #075E54` pada header |
-| FAB hijau | Tombol new chat: `#00a884`, 56px, shadow |
-| Search rounded | Input search: `border-radius: 24px` |
-| Unread badge hijau | `background: #00a884` |
-| Emoji panel mobile | `border-radius: 16px 16px 0 0`, dari bawah |
-| Chat input rounded | `border-radius: 24px` dengan dark background |
-| Transisi panel | Slide dari kanan saat buka chat (CSS transition) |
+| Single-column layout | Sidebar & chat panel full layar, tidak side-by-side |
+| Header hijau WA | `background: #075E54` |
+| FAB hijau | Tombol new chat 56px, shadow, floating |
+| Transisi slide | Chat panel slide dari kanan |
+| Zoom disabled | Pinch zoom, double tap zoom, zoom controls mati |
+| Scroll bars hidden | Tidak ada scroll bar browser |
+| Long press disabled | Tidak muncul context menu browser |
+| Overview mode | Konten pas di layar, tidak bisa zoom-out |
 
 ---
 
