@@ -1,7 +1,11 @@
 package com.wawrapper.app;
 
 import android.app.AlertDialog;
+import android.app.DownloadManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -9,11 +13,18 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.view.View;
+import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
+import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -21,8 +32,11 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
+import java.io.File;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -51,6 +65,7 @@ public class MainActivity extends BridgeActivity {
         checkAndRequestPermissions();
         configureWebView();
         startWebSocketService();
+        initNetworkMonitor();
         initProximitySensor();
         handleShareIntent(getIntent());
 
@@ -149,6 +164,22 @@ public class MainActivity extends BridgeActivity {
         handleShareIntent(intent);
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                                           int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        boolean allGranted = true;
+        for (int result : grantResults) {
+            if (result != PackageManager.PERMISSION_GRANTED) {
+                allGranted = false;
+                break;
+            }
+        }
+        if (allGranted) {
+            Toast.makeText(this, "Semua izin diberikan", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void hideSystemUI() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             getWindow().setDecorFitsSystemWindows(false);
@@ -169,22 +200,19 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void checkAndRequestPermissions() {
-        String[] permissions;
+        List<String> perms = new ArrayList<>();
+        perms.add(Manifest.permission.CAMERA);
+        perms.add(Manifest.permission.RECORD_AUDIO);
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions = new String[]{
-                Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO,
-                Manifest.permission.POST_NOTIFICATIONS
-            };
-        } else {
-            permissions = new String[]{
-                Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO
-            };
+            perms.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            perms.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
         }
 
         boolean needRequest = false;
-        for (String perm : permissions) {
+        for (String perm : perms) {
             if (ContextCompat.checkSelfPermission(this, perm)
                     != PackageManager.PERMISSION_GRANTED) {
                 needRequest = true;
@@ -194,7 +222,7 @@ public class MainActivity extends BridgeActivity {
 
         if (needRequest) {
             ActivityCompat.requestPermissions(
-                this, permissions, PERMISSION_REQUEST_CODE
+                this, perms.toArray(new String[0]), PERMISSION_REQUEST_CODE
             );
         }
     }
@@ -285,6 +313,55 @@ public class MainActivity extends BridgeActivity {
         // Disable long press context menu (browser-like)
         webView.setOnLongClickListener(v -> true);
 
+        // === DOWNLOAD MANAGER ===
+        webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+            if (!hasStoragePermission()) {
+                requestStoragePermission();
+                Toast.makeText(this, "Izin penyimpanan diperlukan untuk download", Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+            request.setMimeType(mimeType);
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setTitle(URLUtil.guessFileName(url, contentDisposition, mimeType));
+            request.setDescription("Mengunduh...");
+            request.setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_DOWNLOADS,
+                "WhatsApp/" + URLUtil.guessFileName(url, contentDisposition, mimeType)
+            );
+
+            // Set cookies for authenticated downloads
+            String cookies = CookieManager.getInstance().getCookie(url);
+            if (cookies != null) {
+                request.addRequestHeader("Cookie", cookies);
+            }
+            request.addRequestHeader("User-Agent", userAgent);
+
+            try {
+                DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+                long downloadId = dm.enqueue(request);
+
+                // Register receiver to show toast on completion
+                registerReceiver(new BroadcastReceiver() {
+                    @Override
+                    public void onReceive(Context context, Intent intent) {
+                        long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
+                        if (id == downloadId) {
+                            Toast.makeText(MainActivity.this,
+                                "Download selesai", Toast.LENGTH_SHORT).show();
+                            context.unregisterReceiver(this);
+                        }
+                    }
+                }, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+
+                Toast.makeText(this, "Mengunduh...", Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Gagal memulai download: " + e.getMessage(),
+                    Toast.LENGTH_LONG).show();
+            }
+        });
+
         // Security
         webView.getSettings().setAllowFileAccess(false);
 
@@ -301,6 +378,123 @@ public class MainActivity extends BridgeActivity {
             startForegroundService(intent);
         } else {
             startService(intent);
+        }
+    }
+
+    private void initNetworkMonitor() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return;
+
+        NetworkRequest.Builder builder = new NetworkRequest.Builder();
+        builder.addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        cm.registerNetworkCallback(builder.build(), new ConnectivityManager.NetworkCallback() {
+            private boolean wasOffline = false;
+
+            @Override
+            public void onAvailable(Network network) {
+                runOnUiThread(() -> {
+                    if (wasOffline) {
+                        hideOfflineBanner();
+                        // Auto-reload WA if we're on an error page
+                        if (webView != null) {
+                            webView.evaluateJavascript(
+                                "document.querySelector('[data-testid=\"error-screen\"], " +
+                                "[data-testid=\"reload-button\"]')",
+                                value -> {
+                                    if (value != null && !value.equals("null")) {
+                                        webView.reload();
+                                    }
+                                }
+                            );
+                        }
+                        wasOffline = false;
+                    }
+                });
+            }
+
+            @Override
+            public void onLost(Network network) {
+                runOnUiThread(() -> {
+                    wasOffline = true;
+                    showOfflineBanner();
+                });
+            }
+
+            @Override
+            public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
+                boolean connected = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+                if (!connected) {
+                    runOnUiThread(() -> {
+                        wasOffline = true;
+                        showOfflineBanner();
+                    });
+                }
+            }
+        });
+    }
+
+    private boolean isOnline() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return false;
+        Network activeNetwork = cm.getActiveNetwork();
+        if (activeNetwork == null) return false;
+        NetworkCapabilities caps = cm.getNetworkCapabilities(activeNetwork);
+        return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+    }
+
+    private void showOfflineBanner() {
+        if (webView == null) return;
+        String js =
+            "(function(){" +
+            "var b=document.getElementById('wa-offline-banner');" +
+            "if(b)return;" +
+            "b=document.createElement('div');" +
+            "b.id='wa-offline-banner';" +
+            "b.style.cssText='" +
+            "position:fixed;top:0;left:0;right:0;z-index:99999;" +
+            "background:#d32f2f;color:#fff;text-align:center;" +
+            "padding:12px 16px;font-size:14px;font-family:sans-serif;" +
+            "font-weight:500;transform:translateY(-100%);" +
+            "transition:transform 0.3s ease;display:flex;" +
+            "align-items:center;justify-content:center;gap:8px;';" +
+            "b.innerHTML='&#9888; Tidak ada koneksi internet';" +
+            "document.body.appendChild(b);" +
+            "requestAnimationFrame(function(){" +
+            "b.style.transform='translateY(0)';" +
+            "});" +
+            "var m=document.createElement('meta');" +
+            "m.name='viewport';m.id='wa-offline-meta';" +
+            "m.content='width=device-width,initial-scale=1,maximum-scale=1';" +
+            "document.head.appendChild(m);" +
+            "})();";
+        webView.evaluateJavascript(js, null);
+    }
+
+    private void hideOfflineBanner() {
+        if (webView == null) return;
+        String js =
+            "(function(){" +
+            "var b=document.getElementById('wa-offline-banner');" +
+            "if(!b)return;" +
+            "b.style.transform='translateY(-100%)';" +
+            "setTimeout(function(){b.remove();},350);" +
+            "})();";
+        webView.evaluateJavascript(js, null);
+    }
+
+    private boolean hasStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return true; // Scoped storage — no WRITE_EXTERNAL_STORAGE needed
+        }
+        return ContextCompat.checkSelfPermission(this,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestStoragePermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            ActivityCompat.requestPermissions(this,
+                new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                PERMISSION_REQUEST_CODE + 1);
         }
     }
 
