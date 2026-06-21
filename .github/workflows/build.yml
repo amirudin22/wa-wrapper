@@ -15,7 +15,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Setup Java
@@ -32,9 +32,6 @@ jobs:
 
       - name: Build web assets
         run: npm run build
-
-      - name: Install Capacitor Android
-        run: npx cap add android
 
       - name: Sync Capacitor
         run: npx cap sync android
