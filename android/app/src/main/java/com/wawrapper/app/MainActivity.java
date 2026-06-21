@@ -58,7 +58,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onSaveInstanceState(Bundle outState) {
+    public void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         if (webView != null) {
             webView.saveState(outState);
@@ -66,7 +66,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onPause() {
+    public void onPause() {
         super.onPause();
         if (webView != null) {
             webView.onPause();
@@ -74,7 +74,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onResume() {
+    public void onResume() {
         super.onResume();
         if (webView != null) {
             webView.onResume();
@@ -82,7 +82,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onDestroy() {
+    public void onDestroy() {
         if (sensorManager != null) {
             sensorManager.unregisterListener(proximityListener);
         }
