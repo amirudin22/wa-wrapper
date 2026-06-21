@@ -104,21 +104,30 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
+        if (webView == null) {
+            super.onBackPressed();
             return;
         }
 
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - backPressedTime > 2000) {
-            backPressedTime = currentTime;
-            new AlertDialog.Builder(this)
-                .setTitle("Keluar Aplikasi?")
-                .setMessage("Aplikasi akan ditutup. Chat dan session tetap aman.")
-                .setPositiveButton("Ya", (dialog, which) -> finish())
-                .setNegativeButton("Tidak", null)
-                .show();
-        }
+        // Cek via JS apakah user sedang di chat (SPA) atau di chat list
+        webView.evaluateJavascript("__WA_wrapper.isInChat()", value -> {
+            if ("true".equals(value)) {
+                // Masih di chat — back ke chat list via WA internal
+                webView.evaluateJavascript("__WA_wrapper.goBackToHomepage()", null);
+            } else {
+                // Sudah di chat list — tanya konfirmasi exit
+                long currentTime = System.currentTimeMillis();
+                if (currentTime - backPressedTime > 2000) {
+                    backPressedTime = currentTime;
+                    new AlertDialog.Builder(this)
+                        .setTitle("Keluar Aplikasi?")
+                        .setMessage("Aplikasi akan ditutup. Chat dan session tetap aman.")
+                        .setPositiveButton("Ya", (dialog, which) -> finish())
+                        .setNegativeButton("Tidak", null)
+                        .show();
+                }
+            }
+        });
     }
 
     @Override
@@ -380,6 +389,18 @@ public class MainActivity extends BridgeActivity {
         view.evaluateJavascript(cssInjection, null);
 
         String layoutFix =
+            "window.__WA_wrapper=window.__WA_wrapper||{};" +
+            "window.__WA_wrapper.isInChat=function(){" +
+            "var p=document.querySelector('[data-testid=\"conversation-panel\"]');" +
+            "return p!==null&&p.offsetParent!==null;" +
+            "};" +
+            "window.__WA_wrapper.goBackToHomepage=function(){" +
+            "var b=document.querySelector('[data-testid=\"back\"]," +
+            "[role=\"button\"][aria-label*=\"back\" i]," +
+            "[aria-label*=\"kembali\" i]');" +
+            "if(b){b.click();}" +
+            "window.history.back();" +
+            "};" +
             "setInterval(function(){" +
             "var s=document.querySelector('[data-testid=\"sidebar\"]');" +
             "var p=document.querySelector('[data-testid=\"conversation-panel\"]');" +

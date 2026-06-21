@@ -88,6 +88,23 @@ export function applyLayoutFix(): void {
   setInterval(enforceLayout, 2000)
 }
 
+export function isInChat(): boolean {
+  const panel = document.querySelector('[data-testid="conversation-panel"]') as HTMLElement | null
+  return panel !== null && panel.offsetParent !== null
+}
+
+export function goBackToHomepage(): boolean {
+  const backBtn = document.querySelector(
+    '[data-testid="back"], [role="button"][aria-label*="back" i], [aria-label*="kembali" i]'
+  ) as HTMLElement | null
+  if (backBtn) {
+    backBtn.click()
+    return true
+  }
+  window.history.back()
+  return true
+}
+
 export function getInjectionVersion(): string {
   return INJECTION_VERSION
 }
